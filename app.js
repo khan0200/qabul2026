@@ -43,6 +43,35 @@ const studentsList = document.getElementById('studentsList');
 const studentSearch = document.getElementById('studentSearch');
 const levelFilter = document.getElementById('levelFilter');
 const submitBtn = document.getElementById('submitBtn');
+const studentDetailsModalEl = document.getElementById('studentDetailsModal');
+
+studentDetailsModalEl.addEventListener('hide.bs.modal', () => {
+    if (studentDetailsModalEl.contains(document.activeElement)) {
+        document.activeElement.blur();
+    }
+});
+
+let toastTimeout;
+function showToast(message, type = 'info') {
+    let toast = document.getElementById('iosToast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'iosToast';
+        toast.className = 'ios-toast';
+        document.body.appendChild(toast);
+    }
+
+    toast.textContent = message;
+    toast.classList.remove('is-success', 'is-error', 'is-show');
+    if (type === 'success') toast.classList.add('is-success');
+    if (type === 'error') toast.classList.add('is-error');
+
+    requestAnimationFrame(() => toast.classList.add('is-show'));
+    clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => {
+        toast.classList.remove('is-show');
+    }, 2400);
+}
 
 // --- Level Mapping for Universities ---
 const levelMapping = {
@@ -162,7 +191,7 @@ addStudentForm.addEventListener('submit', async (e) => {
     const motherOptions = Array.from(document.querySelectorAll('#motherConditions input:checked')).map(cb => cb.value);
 
     if (!name || !phone || !eduLevel || selectedUnis.length === 0 || !langLevel) {
-        alert("Please fill all required fields!");
+        showToast("Please fill all required fields!", "error");
         return;
     }
 
@@ -191,11 +220,11 @@ addStudentForm.addEventListener('submit', async (e) => {
         addStudentForm.reset();
         universityCheckboxesContainer.innerHTML = '<div class="text-muted small">First select level...</div>';
         selectedCountText.textContent = "First select level...";
-        alert("Student data saved successfully!");
+        showToast("Student data saved successfully!", "success");
 
     } catch (error) {
         console.error("Error adding document: ", error);
-        alert("Error saving data: " + error.message);
+        showToast("Error saving data: " + error.message, "error");
     } finally {
         submitBtn.disabled = false;
         submitBtn.querySelector('.spinner-border').classList.add('d-none');
@@ -205,8 +234,17 @@ addStudentForm.addEventListener('submit', async (e) => {
 // --- Details Modal Logic ---
 let currentSnapshotStudents = [];
 
-async function openStudentDetails(studentName) {
-    const student = currentSnapshotStudents.find(s => s.name === studentName);
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+async function openStudentDetails(studentId) {
+    const student = currentSnapshotStudents.find(s => s.id === studentId);
     if (!student) return;
 
     document.getElementById('detailStudentName').textContent = student.name;
@@ -218,7 +256,7 @@ async function openStudentDetails(studentName) {
 
     const uniContainer = document.getElementById('detailUniversities');
     uniContainer.innerHTML = (student.universities || []).map(u => `
-        <span class="badge bg-white text-dark border fw-medium px-2 py-1">${u}</span>
+        <span class="badge bg-white text-dark border fw-medium px-2 py-1">${escapeHtml(u)}</span>
     `).join('') || '<div class="text-muted small">N/A</div>';
 
     document.getElementById('detailLanguage').textContent = student.language || 'N/A';
@@ -230,19 +268,19 @@ async function openStudentDetails(studentName) {
         <div class="col-6">
             <div class="p-2 rounded-3 bg-light border h-100">
                 <label class="text-muted small fw-bold text-uppercase mb-1 d-block" style="font-size: 0.65rem;">Father</label>
-                ${(student.family?.father || []).map(f => `<div class="small fw-medium" style="font-size: 0.75rem;">• ${f}</div>`).join('') || '<div class="text-muted small" style="font-size: 0.75rem;">No Info</div>'}
+                ${(student.family?.father || []).map(f => `<div class="small fw-medium" style="font-size: 0.75rem;">- ${escapeHtml(f)}</div>`).join('') || '<div class="text-muted small" style="font-size: 0.75rem;">No Info</div>'}
             </div>
         </div>
         <div class="col-6">
             <div class="p-2 rounded-3 bg-light border h-100">
                 <label class="text-muted small fw-bold text-uppercase mb-1 d-block" style="font-size: 0.65rem;">Mother</label>
-                ${(student.family?.mother || []).map(m => `<div class="small fw-medium" style="font-size: 0.75rem;">• ${m}</div>`).join('') || '<div class="text-muted small" style="font-size: 0.75rem;">No Info</div>'}
+                ${(student.family?.mother || []).map(m => `<div class="small fw-medium" style="font-size: 0.75rem;">- ${escapeHtml(m)}</div>`).join('') || '<div class="text-muted small" style="font-size: 0.75rem;">No Info</div>'}
             </div>
         </div>
     `;
 
     // Show Modal
-    const modalEl = document.getElementById('studentDetailsModal');
+    const modalEl = studentDetailsModalEl;
     const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
     modal.show();
 
@@ -250,68 +288,61 @@ async function openStudentDetails(studentName) {
     const shareBtn = document.getElementById('shareBtn');
     shareBtn.onclick = async () => {
         const originalText = shareBtn.innerHTML;
-        shareBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Generating...';
+        shareBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Copying...';
         shareBtn.disabled = true;
 
+        let footer;
         try {
-            const modalContent = document.querySelector('.modal-content');
+            const modalContent = modalEl.querySelector('.modal-content');
 
             // Wait for images/styles to render perfectly
             await new Promise(resolve => setTimeout(resolve, 800));
 
-            // hide footer + close button temporarily
-            const footer = modalContent.querySelector('.modal-footer');
-            const closeBtn = modalContent.querySelector('.btn-close');
+            footer = modalContent.querySelector('.modal-footer');
+            if (footer) {
+                footer.style.display = 'none';
+            }
 
-            if (footer) footer.style.display = 'none';
-            if (closeBtn) closeBtn.style.display = 'none';
-
-            // Use htmlToImage from window global since app.js is a module
-            const blob = await window.htmlToImage.toBlob(modalContent, {
-                pixelRatio: 2,
+            // Use html2canvas to avoid cross-origin cssRules parsing issues from html-to-image
+            const canvas = await window.html2canvas(modalContent, {
+                scale: 2,
                 backgroundColor: '#ffffff',
-                style: {
-                    borderRadius: '16px',
-                    overflow: 'hidden'
-                }
+                useCORS: true
             });
 
-            // restore UI
-            if (footer) footer.style.display = '';
-            if (closeBtn) closeBtn.style.display = '';
+            let blob = await new Promise((resolve) => {
+                canvas.toBlob(resolve, 'image/png');
+            });
+
+            if (!blob) {
+                const dataUrl = canvas.toDataURL('image/png');
+                blob = await (await fetch(dataUrl)).blob();
+            }
 
             if (!blob) {
                 throw new Error('Image conversion failed');
             }
 
-            const file = new File([blob], `${student.name}_Card.jpeg`, { type: 'image/jpeg' });
-
-            // Mobile Share
-            if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                try {
-                    await navigator.share({
-                        files: [file],
-                        title: `${student.name}'s Student Card`,
-                        text: 'Check out this student details card from Koreyada Talim.',
-                    });
-                } catch (err) {
-                    if (err.name !== 'AbortError') {
-                        console.error('Share failed:', err);
-                        // Fallback to download if share fails but not cancelled
-                        downloadImage(blob, student.name);
-                    }
-                }
+            if (window.ClipboardItem && navigator.clipboard?.write) {
+                await navigator.clipboard.write([
+                    new ClipboardItem({ 'image/png': blob })
+                ]);
+                showToast('Card copied. Paste it in Telegram.', 'success');
             } else {
-                // Desktop Download Fallback
                 downloadImage(blob, student.name);
+                showToast('Clipboard copy unsupported. Downloaded instead.', 'info');
             }
 
             resetButton();
 
         } catch (error) {
             console.error('Error generating image:', error);
-            alert('Could not generate image. Please try again.');
+            showToast('Could not generate image. Please try again.', 'error');
             resetButton();
+        } finally {
+            if (footer) {
+                footer.style.display = '';
+            }
         }
 
         function resetButton() {
@@ -323,7 +354,7 @@ async function openStudentDetails(studentName) {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `${name}_Card.jpeg`;
+            a.download = `${name}_Card.png`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -342,30 +373,42 @@ async function openStudentDetails(studentName) {
 
     (async () => {
         let isTop1Percent = false;
+        let hasCollegeWithoutRegional = false;
+        const suggestions = [];
+        const father = Array.isArray(student.family?.father) ? student.family.father : [];
+        const mother = Array.isArray(student.family?.mother) ? student.family.mother : [];
+        const allFamily = [...father, ...mother].map(v => String(v || '').toUpperCase());
+        const language = String(student.language || '').toUpperCase();
 
-        // 1. Check Student Level
+        const hasFamilyCondition = (condition) => allFamily.includes(condition);
+        const fatherAbroad = father.map(v => String(v || '').toUpperCase()).includes('CHET ELDA ISHLAYDI');
+        const motherAbroad = mother.map(v => String(v || '').toUpperCase()).includes('CHET ELDA ISHLAYDI');
+
+        // Existing 1% TOP rule
         if (student.educationLevel && student.educationLevel.toUpperCase().includes('1% TOP')) {
             isTop1Percent = true;
         }
 
-        // 2. Check each selected University
         if (!isTop1Percent && student.universities && student.universities.length > 0) {
             try {
-                // Firestore 'in' query has a limit of 10. Batch the university names.
                 const unisCopy = [...student.universities];
                 while (unisCopy.length > 0) {
-                    const batch = unisCopy.splice(0, 10); // Get up to 10 university names
+                    const batch = unisCopy.splice(0, 10);
                     const q = query(universitiesCol, where("name", "in", batch));
                     const snapshot = await getDocs(q);
 
                     snapshot.forEach(doc => {
                         const data = doc.data();
+                        const levels = Array.isArray(data.levels) ? data.levels.map(l => String(l || '').toUpperCase()) : [];
                         if (data.levels && Array.isArray(data.levels) && data.levels.includes('1% TOP')) {
                             isTop1Percent = true;
                         }
+                        if (levels.includes('COLLEGE') && !levels.includes('REGIONAL (TELEX)')) {
+                            hasCollegeWithoutRegional = true;
+                        }
                     });
 
-                    if (isTop1Percent) break; // Found a 1% TOP university, no need to check further
+                    if (isTop1Percent) break;
                 }
             } catch (error) {
                 console.error("Error fetching university details:", error);
@@ -373,11 +416,59 @@ async function openStudentDetails(studentName) {
         }
 
         if (isTop1Percent) {
-            suggestionBox.textContent = "1% lik Universitetlarga viza chiqishi 100%, Universitetga qabul qilinsangiz bo'ldi. Qabullar erta ochiladi, erta yopiladi, tezroq harakat qiling!";
-            suggestionBox.className = "text-success small fw-bold";
-            suggestionContainer.className = "h-100 p-2 rounded-3 bg-success bg-opacity-10 border border-success border-opacity-10";
+            suggestions.push("1% lik Universitetlarga viza chiqishi 100%, Universitetga qabul qilinsangiz bo'ldi. Qabullar erta ochiladi, erta yopiladi, tezroq harakat qiling!");
+        }
+
+        const isBachelor = String(student.educationLevel || '').toUpperCase().includes('BAKALAVR');
+        const isKollej = String(student.educationLevel || '').toUpperCase().includes('KOLLEJ');
+        if (isBachelor && !isTop1Percent) {
+            suggestions.push("USHBU UNIVERSITETGA OTA-ONA DAROMADI VA 31 KUNLIK KDB BANKSHOT MA'LUMOTNOMASI TALAB QILINADI!");
+        }
+        if (isKollej && hasCollegeWithoutRegional) {
+            suggestions.push("USHBU UNIVERSITETGA OTA-ONA DAROMADI VA 31 KUNLIK KDB BANKSHOT MA'LUMOTNOMASI TALAB QILINADI!");
+        }
+
+        // Language expected rule
+        if (language.includes('IELTS EXPECTED') || language.includes('TOPIK EXPECTED') || language.includes('SKA EXPECTED')) {
+            suggestions.push("TEZROQ TIL SERTIFIKATI OLING!");
+        }
+
+        // Working abroad rule (father/mother based text)
+        if (fatherAbroad || motherAbroad) {
+            let parentText = "OTA YOKI ONANING";
+            if (fatherAbroad && !motherAbroad) parentText = "OTANING";
+            if (motherAbroad && !fatherAbroad) parentText = "ONANING";
+
+            suggestions.push(
+                `CHET ELDAGI DAROMADI TASDIQLOVCHI HUJJATLAR ZARUR. BULAR: ${parentText} BOSHQA DAVLATDA KIRDI CHIQDI QILGAN ZAGRANDAGI PECHAT SKANERI, ISH JOYIDAN MA'LUMOTNOMA, OXIRGI 12 OYDA OLGAN DAROMADI MA'LUMOTNOMASI, YUBORGAN PULLARI HAQIDA MA'LUMOTNOMA ZARUR! VIZAGA TOPSHIRGANDA KERAK BO'LADI`
+            );
+        }
+
+        // Family condition rules
+        if (hasFamilyCondition("NOMIDA UY BOR KADASTR YO'Q")) {
+            suggestions.push("UYNI KADASTRDAN O'TKAZIB, KADASTRDAN KO'CHIRMA QILISH ZARUR. VIZAGA TOPSHIRGANDA KERAK BO'LADI");
+        }
+
+        if (hasFamilyCondition("TADBIRKOR")) {
+            suggestions.push("TADBIRKORLIK GUVOHNOMASI\nBANK AYLANMASI VIZAGA TOPSHIRGANDA KERAK BO'LADI.");
+        }
+
+        if (hasFamilyCondition("AJRASHGAN")) {
+            suggestions.push("AJRIM GUVOHNOMASI KERAK!");
+        }
+
+        if (hasFamilyCondition("VAFOT ETGAN")) {
+            suggestions.push("VAFOT ETGANLIGI TO'G'RISIDA MA'LUMOTNOMA");
+        }
+
+        if (suggestions.length > 0) {
+            suggestionBox.textContent = suggestions.join("\n\n");
+            suggestionBox.style.whiteSpace = "pre-wrap";
+            suggestionBox.className = "text-dark small fw-semibold";
+            suggestionContainer.className = "h-100 p-2 rounded-3 bg-warning bg-opacity-10 border border-warning border-opacity-25";
         } else {
             suggestionBox.textContent = "Wait for manager's recommendation...";
+            suggestionBox.style.whiteSpace = "";
             suggestionBox.className = "text-dark small";
             suggestionContainer.className = "h-100 p-2 rounded-3 bg-primary bg-opacity-10 border border-primary border-opacity-10";
         }
@@ -396,25 +487,22 @@ function renderStudents() {
         snapshot.forEach((doc) => {
             currentSnapshotStudents.push({ id: doc.id, ...doc.data() });
         });
-
-        const updateView = () => {
-            const searchTerm = studentSearch.value.toLowerCase();
-            const filterLevel = levelFilter.value;
-
-            const filtered = currentSnapshotStudents.filter(s => {
-                const nameMatch = s.name?.toLowerCase().includes(searchTerm);
-                const phoneMatch = s.phone?.includes(searchTerm);
-                const uniMatch = s.universities?.some(u => u.toLowerCase().includes(searchTerm));
-                return (nameMatch || phoneMatch || uniMatch) && (filterLevel === "" || s.educationLevel === filterLevel);
-            });
-
-            displayFilteredStudents(filtered);
-        };
-
-        studentSearch.addEventListener('input', updateView);
-        levelFilter.addEventListener('change', updateView);
-        updateView();
+        updateStudentsView();
     });
+}
+
+function updateStudentsView() {
+    const searchTerm = studentSearch.value.toLowerCase();
+    const filterLevel = levelFilter.value;
+
+    const filtered = currentSnapshotStudents.filter(s => {
+        const nameMatch = s.name?.toLowerCase().includes(searchTerm);
+        const phoneMatch = s.phone?.includes(searchTerm);
+        const uniMatch = s.universities?.some(u => u.toLowerCase().includes(searchTerm));
+        return (nameMatch || phoneMatch || uniMatch) && (filterLevel === "" || s.educationLevel === filterLevel);
+    });
+
+    displayFilteredStudents(filtered);
 }
 
 function displayFilteredStudents(students) {
@@ -424,24 +512,28 @@ function displayFilteredStudents(students) {
     }
 
     studentsList.innerHTML = students.map(s => `
-        <div class="col-md-6 col-lg-4 mb-4" onclick="openStudentDetails('${s.name}')" style="cursor:pointer;">
-            <div class="student-card h-100">
+        <div class="col-md-6 col-lg-4 mb-4">
+            <div class="student-card h-100" data-student-id="${s.id}" style="cursor:pointer;">
                 <div class="d-flex justify-content-between align-items-center mb-2">
-                    <h5 class="fw-bold mb-0 text-dark text-uppercase">${s.name}</h5>
-                    <span class="level-badge level-${getLevelClass(s.educationLevel)}">${s.educationLevel}</span>
+                    <h5 class="fw-bold mb-0 text-dark text-uppercase">${escapeHtml(s.name)}</h5>
+                    <span class="level-badge level-${getLevelClass(s.educationLevel)}">${escapeHtml(s.educationLevel)}</span>
                 </div>
-                <div class="phone-badge mb-1"><i class="bi bi-phone me-1"></i> ${s.phone}</div>
+                <div class="phone-badge mb-1"><i class="bi bi-phone me-1"></i> ${escapeHtml(s.phone)}</div>
                 <div class="uni-ghost-text">
-                    ${(s.universities || []).map(u => `<div class="mb-1"><i class="bi bi-bank2 me-1 small"></i>${u}</div>`).join('')}
+                    ${(s.universities || []).map(u => `<div class="mb-1"><i class="bi bi-bank2 me-1 small"></i>${escapeHtml(u)}</div>`).join('')}
                 </div>
                 <div class="mb-3">
                     <div class="text-muted small mb-1">Language:</div>
-                    <div class="fw-bold text-dark small">${s.language}</div>
+                    <div class="fw-bold text-dark small">${escapeHtml(s.language)}</div>
                 </div>
-                ${s.notes ? `<div class="p-2 rounded bg-light border-start border-4 border-warning small"><div class="text-muted fw-bold mb-1" style="font-size: 0.6rem;">NOTES</div>${s.notes}</div>` : ''}
+                ${s.notes ? `<div class="p-2 rounded bg-light border-start border-4 border-warning small"><div class="text-muted fw-bold mb-1" style="font-size: 0.6rem;">NOTES</div>${escapeHtml(s.notes)}</div>` : ''}
             </div>
         </div>
     `).join('');
+
+    studentsList.querySelectorAll('.student-card[data-student-id]').forEach((card) => {
+        card.addEventListener('click', () => openStudentDetails(card.dataset.studentId));
+    });
 }
 
 function getLevelClass(level) {
@@ -456,3 +548,5 @@ function getLevelClass(level) {
 }
 
 renderStudents();
+studentSearch.addEventListener('input', updateStudentsView);
+levelFilter.addEventListener('change', updateStudentsView);
